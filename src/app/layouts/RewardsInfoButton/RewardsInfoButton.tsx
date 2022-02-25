@@ -353,7 +353,7 @@ const RewardsInfoButton: React.FC<Props> = (props: Props) => {
       // guide users to select rewards
       if (selectedDistributions.length === 0) {
         if (showDetails) {
-          setSelectedDistributions(claimableRewards.filter(r => !claimedDistributions.includes(r.info.id)));
+          setSelectedDistributions(claimableRewards.filter(r => r.funded && !claimedDistributions.includes(r.info.id)));
         } else {
           setShowDetails(true)
         }
