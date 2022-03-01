@@ -3,104 +3,153 @@ import { Box, IconButton, TextField, Typography, Button, Tooltip } from "@materi
 import { makeStyles } from "@material-ui/core/styles";
 import cls from "classnames";
 import { useDispatch, useSelector } from "react-redux";
-import NavigationPrompt from "react-router-navigation-prompt";
 import { useHistory } from "react-router";
+import { Redirect } from "react-router-dom";
 import dayjs from "dayjs";
 import ArrowBackIcon from '@material-ui/icons/ArrowBack';
 import PanoramaIcon from '@material-ui/icons/Panorama';
 import InfoIcon from '@material-ui/icons/InfoOutlined';
 import Dropzone, { FileRejection, DropEvent } from "react-dropzone";
+import { fromBech32Address, toBech32Address } from "@zilliqa-js/zilliqa";
 import { ArkClient } from "core/utilities";
-import { EMAIL_REGEX, USERNAME_REGEX, TWITTER_REGEX, INSTAGRAM_REGEX } from "app/utils/constants";
-import { useAsyncTask, useNetwork, useToaster, useTaskSubscriber, SimpleMap, snakeToTitle } from "app/utils";
-import { OAuth } from "app/store/types";
+import { useAsyncTask, useNetwork, useToaster, SimpleMap } from "app/utils";
+import { CollectionWithStats, OAuth } from "app/store/types";
 import { ArkInput, FancyButton } from "app/components";
 import { AppTheme } from "app/theme/types";
 import { actions } from "app/store";
 import ArkPage from "app/layouts/ArkPage";
 import { getMarketplace, getWallet } from "app/saga/selectors";
-import { ImageDialog, WarningDialog } from "./components";
+import { ImageDialog } from "./components";
 
-type ProfileInputs = {
-  email: string;
-  username: string;
-  bio: string;
+interface ProfileInputs {
+  name: string;
+  description: string;
   websiteUrl: string;
-  twitterHandle: string;
-  instagramHandle: string;
+  discordUrl: string;
+  instagramUrl: string;
+  twitterUrl: string;
+  telegramUrl: string;
+  ownerName: string;
 }
 
-const EditProfile: React.FC<React.HTMLAttributes<HTMLDivElement>> = (props: any) => {
-  const { children, className, ...rest } = props;
+const emptyInputs = () => ({
+  name: "",
+  description: "",
+  websiteUrl: "",
+  discordUrl: "",
+  instagramUrl: "",
+  twitterUrl: "",
+  telegramUrl: "",
+  ownerName: "",
+})
+
+
+const EditCollection: React.FC<React.HTMLAttributes<HTMLDivElement>> = (props: any) => {
+  console.log("enter edit collection")
+  const { children, className, match, ...rest } = props;
   const classes = useStyles();
   const network = useNetwork();
   const history = useHistory();
   const { wallet } = useSelector(getWallet);
   const marketplaceState = useSelector(getMarketplace);
-  const address = wallet?.addressInfo.byte20
   const { profile } = marketplaceState;
   const toaster = useToaster(false)
   const dispatch = useDispatch();
   const [profileImage, setProfileImage] = useState<string | ArrayBuffer | null>(null);
   const [bannerImage, setBannerImage] = useState<string | ArrayBuffer | null>(null);
+  const [collection, setCollection] = useState<CollectionWithStats>();
   const [uploadFile, setUploadFile] = useState<SimpleMap<File>>({});
   const [runUpdateProfile, isLoading] = useAsyncTask("updateProfile");
   const [runUploadImage] = useAsyncTask("uploadImage");
-  const [runDeleteImage] = useAsyncTask("deleteImage", () => { toaster("Error removing image") })
-  const [errors, setErrors] = useState({
-    username: "",
-    bio: "",
-    email: "",
-    twitterHandle: "",
-    instagramHandle: "",
-    websiteUrl: "",
-  })
-  const [inputValues, setInputValues] = useState<ProfileInputs>({
-    username: profile?.username || "",
-    bio: profile?.bio || "",
-    email: profile?.email || "",
-    twitterHandle: profile?.twitterHandle || "",
-    instagramHandle: profile?.instagramHandle || "",
-    websiteUrl: profile?.websiteUrl || "",
-  })
-  // const [enableEmailNotification, setEnableEmailNotification] = useState(false);
-  const [loadingProfile] = useTaskSubscriber("loadProfile");
+  const [errors, setErrors] = useState(emptyInputs())
+  const [inputValues, setInputValues] = useState<ProfileInputs>(emptyInputs())
   const inputRef = useRef<HTMLDivElement | null>(null);
   const [openDialog, setOpenDialog] = useState(false);
-  const [toRemove, setToRemove] = useState<string | null>(null);
+  // const [toRemove, setToRemove] = useState<string | null>(null);
 
-  const hasChange = useMemo(() => {
-    if (!wallet) return false;
-    let change = false;
-    Object.entries(inputValues).forEach(([key, value]) => {
-      const profileValue = profile ? (profile as any)[key] : undefined;
-      if (!profileValue && !value) return;
-      if (profileValue !== value) {
-        change = true;
-      }
-    })
-    return change;
-  }, [inputValues, profile, wallet])
+  const { hexAddress } = useMemo(() => {
+    if (!match.params?.collection) {
+      history.push("/arky/discover");
+      return {};
+    }
+
+    let collectionAddress = match.params.collection;
+    if (collectionAddress?.startsWith("zil1")) {
+      return {
+        bech32Address: collectionAddress,
+        hexAddress: fromBech32Address(collectionAddress)?.toLowerCase(),
+      };
+    } else {
+      history.push(`/arky/mod/${toBech32Address(collectionAddress)}/modify`);
+      return {};
+    }
+    // eslint-disable-next-line
+  }, [match.params?.collection]);
+
+
+  const reloadCollection = async () => {
+    if (!hexAddress) return;
+
+    const arkClient = new ArkClient(network);
+    const data = await arkClient.listCollection();
+    const collection: CollectionWithStats = data.result.entries.find(
+      (collection: CollectionWithStats) => collection.address === hexAddress
+    );
+    if (collection) {
+      setCollection(collection);
+    } else {
+      history.push("/arky/discover");
+    }
+  };
+
+  // get collection stat data
+  useEffect(() => {
+
+    reloadCollection();
+    // eslint-disable-next-line
+  }, [hexAddress]);
 
   const hasError = useMemo(() => {
     const errorString = Object.values(errors).reduce((prev, curr) => prev + curr);
     return !!errorString;
   }, [errors])
 
+  const hasChange = useMemo(() => {
+    if (!collection) return true
+    let change = false;
+    Object.entries(inputValues).forEach(([key, value]) => {
+      const ogValue = (collection as any)[key];
+      if (!ogValue && !value) return;
+      if (ogValue !== value) {
+        change = true;
+        return false;
+      }
+    })
+    return change;
+  }, [inputValues, collection])
+
   useEffect(() => {
     setInputValues({
-      username: profile?.username || "",
-      bio: profile?.bio || "",
-      email: profile?.email || "",
-      twitterHandle: profile?.twitterHandle || "",
-      instagramHandle: profile?.instagramHandle || "",
-      websiteUrl: profile?.websiteUrl || "",
+      ...inputValues,
+      description: collection?.description ?? "",
+      name: collection?.name ?? "",
+      instagramUrl: collection?.instagramUrl ?? "",
+      discordUrl: collection?.discordUrl ?? "",
+      websiteUrl: collection?.websiteUrl ?? "",
+      twitterUrl: collection?.twitterUrl ?? "",
+      telegramUrl: collection?.telegramUrl ?? "",
+      ownerName: collection?.ownerName ?? "",
     })
-  }, [profile])
+
+    // eslint-disable-next-line
+  }, [collection])
 
 
   const onNavigateBack = () => {
-    history.push(`/arky/profile`);
+    if (!collection)
+      history.push("/arky");
+    else
+      history.push(`/arky/collections/${collection.address}`);
   }
 
   const validateInput = (type: string, input: string) => {
@@ -108,28 +157,16 @@ const EditProfile: React.FC<React.HTMLAttributes<HTMLDivElement>> = (props: any)
       case "username":
         if (input.length && input.length < 2) return "Minimum of 2 characters";
         if (input.length > 20) return "max 20 characters";
-        if (!USERNAME_REGEX.test(input)) return "Must only contain alphanumeric or underscore characters";
         return ""
-      case "bio":
+      case "ownerName":
         if (input.length && input.length < 2) return "Minimum of 2 characters";
         if (input.length > 160) return "Maximum of 160 characters";
         return ""
-      case "email":
-        if (input.length && input.length < 2) return "Minimum of 2 characters";
-        if (input.length > 320) return "Maximum of 320 characters";
-        if (input.length && !EMAIL_REGEX.test(input)) return "Email is invalid"
-        return ""
-      case "twitterHandle":
-        if (input.length && input.length < 2) return "Minimum of 2 characters";
-        if (input.length > 15) return "Maximum of 15 characters";
-        if (input.length && !TWITTER_REGEX.test(input)) return "Must only contain alphanumeric or underscore characters"
-        return ""
-      case "instagramHandle":
-        if (input.length && input.length < 2) return "Minimum of 2 characters";
-        if (input.length > 30) return "Maximum of 30 characters";
-        if (input.length && !INSTAGRAM_REGEX.test(input)) return "Must only contain alphanumeric or underscore characters"
-        return ""
       case "websiteUrl":
+      case "discordUrl":
+      case "instagramUrl":
+      case "twitterUrl":
+      case "telegramUrl":
         if (input.length && input.length < 2) return "Minimum of 2 characters";
         if (input.length > 253) return "Maximum of 253 characters";
         if (!input.match(/^(http|https):\/\//g)) return "Invalid URL, it should begin with http:// or https://";
@@ -167,10 +204,10 @@ const EditProfile: React.FC<React.HTMLAttributes<HTMLDivElement>> = (props: any)
 
   const onUpdateProfile = (goBack?: boolean) => {
     runUpdateProfile(async () => {
-      if (!hasChange && !profileImage && !bannerImage)
+      if (!profileImage && !bannerImage && !hasChange)
         return;
 
-      if (!wallet)
+      if (!wallet || !collection?.address)
         return;
 
       let ok = true
@@ -208,26 +245,25 @@ const EditProfile: React.FC<React.HTMLAttributes<HTMLDivElement>> = (props: any)
           imageUpload(uploadFile.banner, "banner", checkedOAuth!.access_token);
         }
         if (hasChange) {
-          await arkClient.updateProfile(address!, filteredData, checkedOAuth!);
-          toaster("Profile updated");
-          dispatch(actions.MarketPlace.loadProfile());
+          await arkClient.updateCollection(collection.address, filteredData, checkedOAuth!);
+          toaster("Collection updated");
+          reloadCollection();
         }
       } catch (error) {
-        toaster(`Error updating profile: ${typeof error === "string" ? error : error?.message}`);
+        toaster(`Error updating collection: ${typeof error === "string" ? error : error?.message}`);
       }
     });
   }
 
   const imageUpload = (uploadFile: File, type = "profile", accessToken: string) => {
     runUploadImage(async () => {
-      if (!uploadFile || !wallet) return;
+      if (!uploadFile || !wallet || !collection?.address) return;
       const arkClient = new ArkClient(network);
-      const requestResult = await arkClient.requestImageUploadUrl(address!, accessToken, type);
+      const requestResult = await arkClient.requestCollectionImageUploadUrl(collection.address, accessToken, type);
 
       const blobData = new Blob([uploadFile], { type: uploadFile.type });
 
       await arkClient.putImageUpload(requestResult.result.uploadUrl, blobData);
-      await arkClient.notifyUpload(address!, accessToken, type);
       dispatch(actions.MarketPlace.loadProfile());
       toaster("Image updated");
     })
@@ -248,38 +284,23 @@ const EditProfile: React.FC<React.HTMLAttributes<HTMLDivElement>> = (props: any)
     reader.readAsDataURL(files[0]);
   }
 
-  const onDelete = (type: string) => {
-    runDeleteImage(async () => {
-      if (!uploadFile || !wallet || !type) return;
-      const arkClient = new ArkClient(network);
-      const { oAuth } = marketplaceState;
-      let checkedOAuth: OAuth | undefined = oAuth;
-      if (!oAuth?.access_token || oAuth.address !== wallet.addressInfo.bech32 || (oAuth && dayjs(oAuth?.expires_at * 1000).isBefore(dayjs()))) {
-        const { result } = await arkClient.arkLogin(wallet, window.location.hostname);
-        dispatch(actions.MarketPlace.updateAccessToken(result));
-        checkedOAuth = result;
-      }
+  // const clearOrRemove = (type: string) => {
+  //   switch (type) {
+  //     case "banner":
+  //       if (bannerImage) return setBannerImage(null);
+  //       return setToRemove(type);
+  //     case "profile":
+  //       if (profileImage) return setProfileImage(null);
+  //       return setToRemove(type);
+  //     default: return;
+  //   }
+  // }
 
-      await arkClient.removeImage(address!.toLowerCase(), checkedOAuth!.access_token, type);
-      dispatch(actions.MarketPlace.loadProfile());
+  const disableSave = (isLoading) || (!profileImage && !bannerImage && !hasChange) || hasError;
 
-      toaster(`${type} removed!`);
-    })
-  }
-
-  const clearOrRemove = (type: string) => {
-    switch (type) {
-      case "banner":
-        if (bannerImage) return setBannerImage(null);
-        return setToRemove(type);
-      case "profile":
-        if (profileImage) return setProfileImage(null);
-        return setToRemove(type);
-      default: return;
-    }
-  }
-
-  const disableSave = (isLoading || loadingProfile) || (!hasChange && !profileImage && !bannerImage) || hasError;
+  console.log("load profile", profile?.admin)
+  if (!profile?.admin)
+    return <Redirect to="/arky" />
 
   return (
     <ArkPage {...rest}>
@@ -289,16 +310,16 @@ const EditProfile: React.FC<React.HTMLAttributes<HTMLDivElement>> = (props: any)
             <IconButton onClick={onNavigateBack} className={classes.backButton}>
               <ArrowBackIcon /><Typography className={classes.extraMargin}>Go Back</Typography>
             </IconButton>
-            <Typography className={classes.pageHeader}>Edit Profile</Typography>
+            <Typography className={classes.pageHeader}>Edit Collection</Typography>
           </Box>
           {wallet && (
             <Box className={classes.content}>
               <Box display="flex" justifyContent="center" paddingLeft={8} paddingRight={8}>
                 <Box className={classes.uploadBox}>
-                  {(profileImage || profile?.profileImage?.url) && (<img alt="" className={classes.profileImage} src={profileImage?.toString() || profile?.profileImage?.url || ""} />)}
-                  {!profileImage && !profile?.profileImage?.url && (<div className={classes.profileImage} />)}
+                  {(profileImage || collection?.profileImageUrl) && (<img alt="" className={classes.profileImage} src={profileImage?.toString() || collection?.profileImageUrl || ""} />)}
+                  {!profileImage && !collection?.profileImageUrl && (<div className={classes.profileImage} />)}
                   <Button onClick={() => setOpenDialog(true)} className={classes.labelButton}>Select</Button>
-                  {(profileImage || profile?.profileImage?.url) && (<Button className={classes.deleteButton} onClick={() => clearOrRemove("profile")} >{profileImage ? "Clear" : "Remove"}</Button>)}
+                  {/* {(profileImage || collection?.profileImageUrl) && (<Button className={classes.deleteButton} onClick={() => clearOrRemove("profile")} >{profileImage ? "Clear" : "Remove"}</Button>)} */}
                 </Box>
                 <TextField
                   className={classes.uploadInput}
@@ -319,7 +340,7 @@ const EditProfile: React.FC<React.HTMLAttributes<HTMLDivElement>> = (props: any)
                     </Tooltip>
                   </Typography>
                   <Box flexGrow={1} />
-                  {(bannerImage || profile?.bannerImage?.url) && (<Button className={classes.deleteButton} onClick={() => clearOrRemove("banner")}>{bannerImage ? "Clear" : "Remove"}</Button>)}
+                  {/* {(bannerImage || collection?.bannerImageUrl) && (<Button className={classes.deleteButton} onClick={() => clearOrRemove("banner")}>{bannerImage ? "Clear" : "Remove"}</Button>)} */}
                 </Box>
                 <Dropzone accept='image/jpeg, image/png' onFileDialogCancel={() => setBannerImage(null)} onDrop={onHandleDrop}>
                   {({ getRootProps, getInputProps }) => (
@@ -327,13 +348,13 @@ const EditProfile: React.FC<React.HTMLAttributes<HTMLDivElement>> = (props: any)
                       <div {...getRootProps()}>
                         <input {...getInputProps()} />
                         <Box display="flex" flexDirection="column" justifyContent="center" height="100px">
-                          {!bannerImage && !profile?.bannerImage?.url && (
+                          {!bannerImage && !collection?.bannerImageUrl && (
                             <Box display="flex" flexDirection="column" alignItems="center">
                               <PanoramaIcon fontSize="large" />
                               <Typography>Drop a banner image here.</Typography>
                             </Box>
                           )}
-                          {(bannerImage || profile?.bannerImage?.url) && <img alt="" className={classes.bannerImage} src={bannerImage?.toString() || profile?.bannerImage?.url || ""} />}
+                          {(bannerImage || collection?.bannerImageUrl) && <img alt="" className={classes.bannerImage} src={bannerImage?.toString() || collection?.bannerImageUrl || ""} />}
                         </Box>
                       </div>
                     </Box>
@@ -342,79 +363,62 @@ const EditProfile: React.FC<React.HTMLAttributes<HTMLDivElement>> = (props: any)
                 <Typography className={cls(classes.instruction, classes.footerInstruction)}>Recommended format: PNG/JPEG &nbsp;|&nbsp; Banner size: 1300 (w) x 250 (h) px</Typography>
                 <ArkInput
                   className={classes.input}
-                  placeholder="BearCollector" error={errors.username} value={inputValues.username}
-                  label="DISPLAY NAME" onValueChange={(value) => updateInputs("username")(value)}
+                  placeholder="The Bear Market" error={errors.name} value={inputValues.name}
+                  label="COLLECTION NAME" onValueChange={(value) => updateInputs("name")(value)}
                   instruction="This is how other users identify you on ARKY." wordLimit={20}
                 />
-                {/* <ArkInput
-                  placeholder="bearsarecute@example.com" error={errors.email} value={inputValues.email}
-                  label={
-                    <ArkToggle className={classes.switch} initialIsChecked={enableEmailNotification}
-                      onCheck={(isChecked: boolean) => setEnableEmailNotification(isChecked)}
-                      overrideSm={true} header="EMAIL NOTIFICATIONS" />
-                  }
-                  onValueChange={(value) => updateInputs("email")(value)} hideInput={!enableEmailNotification}
-                  instruction="We'll send you notifications on bid updates, price changes and more."
-                />
-
-                <Collapse in={enableEmailNotification}>
-                  <Box display="flex" flexDirection="column">
-                    <ArkCheckbox className={classes.checkbox}
-                      lineHeader="Item Sold" lineFooter="When someone buys your item."
-                    />
-                    <ArkCheckbox className={classes.checkbox}
-                      lineHeader="Bid Activity" lineFooter="When someone bids on your item."
-                    />
-                    <ArkCheckbox className={classes.checkbox}
-                      lineHeader="Auction Expiration" lineFooter="When your auction expires."
-                    />
-                    <ArkCheckbox className={classes.checkbox}
-                      lineHeader="Successful Purchase" lineFooter="When you buy an item."
-                    />
-                    <ArkCheckbox className={classes.checkbox}
-                      lineHeader="Successful Bid" lineFooter="When you place a bid on an item."
-                    />
-                    <ArkCheckbox className={classes.checkbox}
-                      lineHeader="Outbid" lineFooter="When someone outbids you in an auction."
-                    />
-                  </Box>
-                </Collapse> */}
 
                 <ArkInput
                   className={classes.input}
-                  placeholder="My spirit animal's a bear" error={errors.bio} value={inputValues.bio}
-                  label="BIO" onValueChange={(value) => updateInputs("bio")(value)} multiline={true}
-                  instruction="Write a little about yourself." wordLimit={160}
+                  placeholder="Switcheo Labs" error={errors.ownerName} value={inputValues.ownerName}
+                  label="OWNER NAME" onValueChange={(value) => updateInputs("ownerName")(value)}
+                  instruction="The collection owner's name." wordLimit={20}
+                />
+
+                <ArkInput
+                  className={classes.input}
+                  placeholder="My spirit animal's a bear" error={errors.description} value={inputValues.description}
+                  label="DESCRIPTION" onValueChange={(value) => updateInputs("description")(value)} multiline={true}
+                  instruction="Write a little about the collection." wordLimit={160}
                 />
 
                 <Typography className={classes.social}>SOCIALS</Typography>
                 <ArkInput
                   className={classes.input}
-                  startAdornment={<Typography>@</Typography>} inline={true} placeholder="nftsforlife"
-                  error={errors.twitterHandle} value={inputValues.twitterHandle} label="Twitter"
-                  onValueChange={(value) => updateInputs("twitterHandle")(value)}
+                  inline={true} placeholder="https://www.example.com" error={errors.websiteUrl} value={inputValues.websiteUrl}
+                  label="Website" onValueChange={(value) => updateInputs("websiteUrl")(value)}
                 />
                 <ArkInput
                   className={classes.input}
-                  startAdornment={<Typography>@</Typography>} inline={true} placeholder="nftsforlife"
-                  error={errors.instagramHandle} value={inputValues.instagramHandle} label="Instagram"
-                  onValueChange={(value) => updateInputs("instagramHandle")(value)} />
+                  inline={true} placeholder="https://www.example.com" error={errors.discordUrl} value={inputValues.discordUrl}
+                  label="Discord" onValueChange={(value) => updateInputs("discordUrl")(value)}
+                />
                 <ArkInput
                   className={classes.input}
-                  inline={true} placeholder="https://www.example.com" error={errors.websiteUrl} value={inputValues.websiteUrl}
-                  label="Website" onValueChange={(value) => updateInputs("websiteUrl")(value)}
+                  inline={true} placeholder="https://www.example.com" error={errors.instagramUrl} value={inputValues.instagramUrl}
+                  label="Instagram" onValueChange={(value) => updateInputs("instagramUrl")(value)}
+                />
+                <ArkInput
+                  className={classes.input}
+                  inline={true} placeholder="https://www.example.com" error={errors.twitterUrl} value={inputValues.twitterUrl}
+                  label="Twitter" onValueChange={(value) => updateInputs("twitterUrl")(value)}
+                />
+                <ArkInput
+                  className={classes.input}
+                  inline={true} placeholder="https://www.example.com" error={errors.telegramUrl} value={inputValues.telegramUrl}
+                  label="Telegram" onValueChange={(value) => updateInputs("telegramUrl")(value)}
                 />
 
                 <FancyButton
                   fullWidth
                   variant="contained"
                   color="primary"
-                  loading={isLoading || loadingProfile}
+                  loading={isLoading}
                   onClick={() => onUpdateProfile(false)}
                   disabled={disableSave}
                   className={classes.profileButton}
                 >
-                  Save Profile
+                  Save Collection
                 </FancyButton>
               </Box>
             </Box>
@@ -431,26 +435,13 @@ const EditProfile: React.FC<React.HTMLAttributes<HTMLDivElement>> = (props: any)
               </Box>
             </Box>
           )}
+
+          <ImageDialog
+            open={openDialog}
+            onCloseDialog={() => setOpenDialog(false)}
+            onClickConfirm={() => onNavigateBack()}
+          />
         </Box>
-        <ImageDialog
-          open={openDialog || !!toRemove}
-          onCloseDialog={toRemove ? () => setToRemove(null) : () => setOpenDialog(false)}
-          onClickConfirm={toRemove ? () => onDelete(toRemove) : () => onNavigateBack()}
-          message={toRemove ? `${snakeToTitle(toRemove)} image will be remove!` : undefined}
-          buttonText={toRemove ? `Remove` : undefined}
-          header={toRemove ? "Banner Image" : undefined}
-          cancelText={toRemove ? "Cancel" : undefined}
-        />
-        <NavigationPrompt when={hasChange}>
-          {({ onCancel, onConfirm }) => (
-            <WarningDialog
-              open={true}
-              onCloseDialog={() => { setOpenDialog(false); onCancel(); }}
-              onBack={onConfirm}
-              clearPrompt={onCancel}
-            />
-          )}
-        </NavigationPrompt>
       </Box>
     </ArkPage>
   );
@@ -632,4 +623,4 @@ const useStyles = makeStyles((theme: AppTheme) => ({
   }
 }));
 
-export default EditProfile;
+export default EditCollection;
