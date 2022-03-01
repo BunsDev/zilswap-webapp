@@ -135,7 +135,7 @@ function* queryDistribution() {
           const tokenContract = zilswap.getContract(distributor.reward_token_address_hex);
           const balances = yield call([tokenContract, tokenContract.getSubState], "balances");
 
-          const tokenBalance = balances[addr];
+          const tokenBalance = balances.balances[addr];
 
           if (tokenBalance) {
             funded = bnOrZero(tokenBalance).gte(info.amount);
