@@ -133,9 +133,9 @@ function* queryDistribution() {
         const distributor = distributors.find(d => d.distributor_address_hex === addr);
         if (distributor) {
           const tokenContract = zilswap.getContract(distributor.reward_token_address_hex);
-          const balances = yield call([tokenContract, tokenContract.getSubState], "balances");
+          const balancesState = yield call([tokenContract, tokenContract.getSubState], "balances");
 
-          const tokenBalance = balances.balances[addr];
+          const tokenBalance = balancesState.balances[addr];
 
           if (tokenBalance) {
             funded = bnOrZero(tokenBalance).gte(info.amount);
