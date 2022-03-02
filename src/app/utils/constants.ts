@@ -141,7 +141,7 @@ export class PollIntervals {
 
   public static USDRates = 10000;
 
-  public static Distributors = 60000;
+  public static Distributors = 30000;
 
   public static RetryAfterError = 5000;
 
